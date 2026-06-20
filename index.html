@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>行動記録</title>
+
+<!-- カレンダー -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+<style>
+body {
+    font-family: Arial;
+    padding: 10px;
+    background: #f5f5f5;
+}
+
+h2 { text-align:center; }
+
+input, button {
+    width: 100%;
+    padding: 10px;
+    margin: 5px 0;
+    font-size: 16px;
+}
+
+.person {
+    background: white;
+    padding: 8px;
+    margin: 5px 0;
+    border-radius: 8px;
+}
+
+.row {
+    display: flex;
+    gap: 5px;
+}
+
+.row input {
+    flex: 1;
+}
+
+.card {
+    background: white;
+    padding: 10px;
+    margin: 10px 0;
+    border-radius: 10px;
+}
+
+/* カレンダー色 */
+.has-data {
+    background: #90EE90 !important;
+}
+</style>
+</head>
+
+<body>
+
+<h2>行動記録</h2>
+
+<input id="date">
+
+<h3>人物（最大10人）</h3>
+<div id="people"></div>
+
+<h3>行き先</h3>
+<input id="place">
+
+<button onclick="add()">追加</button>
+<button onclick="exportCSV()">CSVバックアップ</button>
+
+<h3>一覧</h3>
+<div id="list"></div>
+
+<script>
+
+// DB
+let db;
+let selectedDates = [];
+
+let req = indexedDB.open("tripDB", 1);
+
+req.onupgradeneeded = e => {
+    db = e.target.result;
+    db.createObjectStore("records", { keyPath: "id", autoIncrement: true });
+};
+
+req.onsuccess = e => {
+    db = e.target.result;
+    load();
+};
+
+// カレンダー初期化（✅ズレ修正済）
+const fp = flatpickr("#date", {
+    dateFormat: "Y-m-d",
+    onDayCreate: function(dObj, dStr, fp, dayElem) {
+
+        let d = dayElem.dateObj;
+
+        // ✅ ローカル時間で日付生成（ズレ防止）
+        let dateStr = d.getFullYear() + "-" +
+            String(d.getMonth() + 1).padStart(2, '0') + "-" +
+            String(d.getDate()).padStart(2, '0');
+
+        if (selectedDates.includes(dateStr)) {
+            dayElem.classList.add("has-data");
+        }
+    }
+});
+
+// 10人入力
+const peopleDiv = document.getElementById("people");
+
+for (let i = 0; i < 10; i++) {
+    peopleDiv.innerHTML += `
+    <div class="person">
+        <input placeholder="名前" id="name${i}">
+        <div class="row">
+            <input type="number" id="count${i}" value="1">
+            <input placeholder="区分" id="kubun${i}">
+        </div>
+    </div>`;
+}
+
+// 追加
+function add() {
+    let place = document.getElementById("place").value;
+    let date = document.getElementById("date").value;
+
+    let tx = db.transaction("records", "readwrite");
+    let store = tx.objectStore("records");
+
+    for (let i = 0; i < 10; i++) {
+        let name = document.getElementById(`name${i}`).value;
+        if (!name) continue;
+
+        let count = document.getElementById(`count${i}`).value || 1;
+        let kubun = document.getElementById(`kubun${i}`).value || "その他";
+
+        store.add({ date, name, count, kubun, place });
+    }
+
+    load();
+}
+
+// 表示＋カレンダー更新
+function load() {
+    let tx = db.transaction("records", "readonly");
+    let store = tx.objectStore("records");
+
+    let req = store.getAll();
+
+    req.onsuccess = () => {
+        let data = req.result;
+        let html = "";
+
+        // ✅ 日付一覧更新
+        selectedDates = [];
+        data.forEach(r => {
+            if (!selectedDates.includes(r.date)) {
+                selectedDates.push(r.date);
+            }
+        });
+
+        fp.redraw(); // カレンダー再描画
+
+        // 一覧表示
+        data.reverse().forEach(r => {
+            html += `
+            <div class="card">
+                ${r.date}<br>
+                ${r.name}（${r.count}人 / ${r.kubun}）<br>
+                → ${r.place}<br>
+                <button onclick="del(${r.id})">削除</button>
+            </div>`;
+        });
+
+        document.getElementById("list").innerHTML = html;
+    };
+}
+
+// 削除
+function del(id) {
+    let tx = db.transaction("records", "readwrite");
+    let store = tx.objectStore("records");
+    store.delete(id);
+    load();
+}
+
+// CSVバックアップ
+function exportCSV() {
+    let tx = db.transaction("records", "readonly");
+    let store = tx.objectStore("records");
+    let req = store.getAll();
+
+    req.onsuccess = () => {
+        let data = req.result;
+
+        let csv = "date,name,count,kubun,place\n";
+        data.forEach(r => {
+            csv += `${r.date},${r.name},${r.count},${r.kubun},${r.place}\n`;
+        });
+
+        let blob = new Blob([csv], { type: "text/csv" });
+        let url = URL.createObjectURL(blob);
+
+        let a = document.createElement("a");
+        a.href = url;
+        a.download = "trip_log.csv";
+        a.click();
+    };
+}
+
+</script>
+
+</body>
+</html>
