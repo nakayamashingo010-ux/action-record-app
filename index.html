@@ -76,6 +76,55 @@ button:active {
     border-radius: 10px;
 }
 
+.person-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.person-head label {
+    margin: 0;
+    font-size: 16px;
+    font-weight: bold;
+    color: #333;
+}
+
+.remove-btn {
+    width: auto !important;
+    padding: 6px 12px !important;
+    margin: 0 !important;
+    font-size: 13px !important;
+    background: #f0f0f0 !important;
+    color: #c44848 !important;
+    border: 1px solid #ddd !important;
+    font-weight: normal !important;
+}
+
+.remove-btn:active {
+    background: #e5e5e5 !important;
+}
+
+.secondary-btn {
+    background: white;
+    color: #4a90d9;
+    border: 2px solid #4a90d9 !important;
+    font-weight: bold;
+}
+
+.secondary-btn:active {
+    background: #eaf2fb;
+}
+
+.secondary-btn:disabled {
+    background: #f0f0f0;
+    color: #999;
+    border-color: #ccc !important;
+}
+
+#moreBtn {
+    display: none;
+}
+
 .person input {
     margin: 6px 0;
 }
@@ -139,15 +188,19 @@ button:active {
 
 <h3>人物（最大10人）</h3>
 <div id="people"></div>
+<button type="button" id="addPersonBtn" class="secondary-btn" onclick="addPersonRow()">＋ 人を追加</button>
 
 <h3>行き先</h3>
-<input id="place" placeholder="行き先を入力">
+<input id="place" placeholder="行き先を入力" list="placeOptions">
+<datalist id="placeOptions"></datalist>
+<datalist id="nameOptions"></datalist>
 
 <button onclick="add()">追加</button>
 <button onclick="exportCSV()">CSVバックアップ</button>
 
 <h3>一覧</h3>
 <div id="list"></div>
+<button type="button" id="moreBtn" class="secondary-btn" onclick="showMore()"></button>
 
 <script>
 
@@ -185,26 +238,71 @@ const fp = flatpickr("#date", {
     }
 });
 
-// 10人入力
+// 人物入力（最初は1人、ボタンで追加／削除）
 const peopleDiv = document.getElementById("people");
+const addPersonBtn = document.getElementById("addPersonBtn");
+const MAX_PEOPLE = 10;
+let personSeq = 0;
 
-for (let i = 0; i < 10; i++) {
-    peopleDiv.innerHTML += `
-    <div class="person">
-        <label>${i + 1}人目</label>
-        <input placeholder="名前" id="name${i}">
+function createPersonRow() {
+    personSeq++;
+    const pid = personSeq;
+
+    const div = document.createElement("div");
+    div.className = "person";
+    div.dataset.pid = pid;
+    div.innerHTML = `
+        <div class="person-head">
+            <label></label>
+            <button type="button" class="remove-btn" onclick="removePersonRow(${pid})">✕ 削除</button>
+        </div>
+        <input class="p-name" placeholder="名前" list="nameOptions">
         <div class="row">
             <div style="flex:1">
                 <label>人数</label>
-                <input type="number" id="count${i}" value="1">
+                <input class="p-count" type="number" value="1">
             </div>
             <div style="flex:1">
                 <label>区分</label>
-                <input placeholder="区分" id="kubun${i}">
+                <input class="p-kubun" placeholder="区分">
             </div>
-        </div>
-    </div>`;
+        </div>`;
+
+    peopleDiv.appendChild(div);
+    renumberPeople();
+    updateAddButtonState();
 }
+
+function addPersonRow() {
+    if (peopleDiv.children.length >= MAX_PEOPLE) return;
+    createPersonRow();
+}
+
+function removePersonRow(pid) {
+    const el = peopleDiv.querySelector(`[data-pid="${pid}"]`);
+    if (el) el.remove();
+    renumberPeople();
+    updateAddButtonState();
+}
+
+function renumberPeople() {
+    [...peopleDiv.children].forEach((div, idx) => {
+        div.querySelector(".person-head label").textContent = `${idx + 1}人目`;
+    });
+}
+
+function updateAddButtonState() {
+    if (peopleDiv.children.length >= MAX_PEOPLE) {
+        addPersonBtn.disabled = true;
+        addPersonBtn.textContent = "上限（10人）に達しました";
+    } else {
+        addPersonBtn.disabled = false;
+        addPersonBtn.textContent = "＋ 人を追加";
+    }
+}
+
+// 最初は1人分だけ表示
+createPersonRow();
 
 // 追加
 function add() {
@@ -214,20 +312,24 @@ function add() {
     let tx = db.transaction("records", "readwrite");
     let store = tx.objectStore("records");
 
-    for (let i = 0; i < 10; i++) {
-        let name = document.getElementById(`name${i}`).value;
-        if (!name) continue;
+    document.querySelectorAll(".person").forEach(div => {
+        let name = div.querySelector(".p-name").value;
+        if (!name) return;
 
-        let count = document.getElementById(`count${i}`).value || 1;
-        let kubun = document.getElementById(`kubun${i}`).value || "その他";
+        let count = div.querySelector(".p-count").value || 1;
+        let kubun = div.querySelector(".p-kubun").value || "その他";
 
         store.add({ date, name, count, kubun, place });
-    }
+    });
 
     load();
 }
 
 // 表示＋カレンダー更新
+let allRecords = [];
+const LIST_PAGE_SIZE = 5;
+let listLimit = LIST_PAGE_SIZE;
+
 function load() {
     let tx = db.transaction("records", "readonly");
     let store = tx.objectStore("records");
@@ -236,7 +338,6 @@ function load() {
 
     req.onsuccess = () => {
         let data = req.result;
-        let html = "";
 
         // ✅ 日付一覧更新
         selectedDates = [];
@@ -248,19 +349,70 @@ function load() {
 
         fp.redraw(); // カレンダー再描画
 
-        // 一覧表示
-        data.reverse().forEach(r => {
-            html += `
-            <div class="card">
-                ${r.date}<br>
-                ${r.name}（${r.count}人 / ${r.kubun}）<br>
-                → ${r.place}<br>
-                <button onclick="del(${r.id})">削除</button>
-            </div>`;
-        });
-
-        document.getElementById("list").innerHTML = html;
+        allRecords = data.reverse(); // 新しい記録が先頭
+        listLimit = LIST_PAGE_SIZE; // 再読み込み時は先頭からやり直す
+        renderList();
+        updateSuggestions(data);
     };
+}
+
+// 過去に入力した名前・行き先をプルダウン候補として表示
+function updateSuggestions(data) {
+    let names = [...new Set(data.map(r => r.name).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, "ja"));
+    let places = [...new Set(data.map(r => r.place).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, "ja"));
+
+    document.getElementById("nameOptions").innerHTML =
+        names.map(n => `<option value="${escapeHtml(n)}"></option>`).join("");
+    document.getElementById("placeOptions").innerHTML =
+        places.map(p => `<option value="${escapeHtml(p)}"></option>`).join("");
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+// 一覧を「直近◯件」だけ描画
+function renderList() {
+    let visible = allRecords.slice(0, listLimit);
+    let html = "";
+
+    visible.forEach(r => {
+        html += `
+        <div class="card">
+            ${r.date}<br>
+            ${r.name}（${r.count}人 / ${r.kubun}）<br>
+            → ${r.place}<br>
+            <button onclick="del(${r.id})">削除</button>
+        </div>`;
+    });
+
+    if (allRecords.length === 0) {
+        html = `<p style="text-align:center;color:#888;">まだ記録がありません</p>`;
+    }
+
+    document.getElementById("list").innerHTML = html;
+
+    let moreBtn = document.getElementById("moreBtn");
+    let remaining = allRecords.length - listLimit;
+
+    if (remaining > 0) {
+        moreBtn.style.display = "block";
+        moreBtn.textContent = `もっと見る（残り${remaining}件）`;
+    } else {
+        moreBtn.style.display = "none";
+    }
+}
+
+// もっと見るボタン
+function showMore() {
+    listLimit += LIST_PAGE_SIZE;
+    renderList();
 }
 
 // 削除
