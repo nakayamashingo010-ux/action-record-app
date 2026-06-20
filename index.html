@@ -200,9 +200,28 @@ button:active {
     background: #c44848;
 }
 
-/* カレンダー色 */
-.has-data {
-    background: #90EE90 !important;
+/* カレンダー：記録がある日をわかりやすく表示 */
+.flatpickr-day.has-data {
+    font-weight: 700;
+    position: relative;
+}
+
+.flatpickr-day.has-data::after {
+    content: "";
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #4a90d9;
+}
+
+.flatpickr-day.has-data.selected::after,
+.flatpickr-day.has-data.startRange::after,
+.flatpickr-day.has-data.endRange::after {
+    background: #fff;
 }
 
 /* flatpickr 自体の文字も少し大きく */
@@ -223,6 +242,9 @@ button:active {
 
 <h2>行動記録</h2>
 
+<label for="inputter">入力者名（あなたの名前）</label>
+<input id="inputter" placeholder="例: 田中">
+
 <label for="date">日付</label>
 <input id="date" placeholder="日付を選択">
 
@@ -237,7 +259,13 @@ button:active {
 </div>
 
 <button onclick="add()">追加</button>
-<button onclick="exportCSV()">CSVバックアップ</button>
+
+<h3>CSV出力</h3>
+<button onclick="exportCSV()">全期間をCSV出力</button>
+
+<label for="csvMonth">月を選んで出力</label>
+<input type="month" id="csvMonth">
+<button type="button" class="secondary-btn" onclick="exportCSVByMonth()">選んだ月だけCSV出力</button>
 
 <h3>一覧</h3>
 <div id="list"></div>
@@ -248,6 +276,20 @@ button:active {
 let db;
 let selectedDates = [];
 
+// 入力者名（この端末に保存、全員共通のCSVに合わせる用）
+const inputterInput = document.getElementById("inputter");
+inputterInput.value = localStorage.getItem("inputterName") || "";
+inputterInput.addEventListener("input", () => {
+    localStorage.setItem("inputterName", inputterInput.value);
+});
+
+// CSV月別出力の月選択欄も、現在の月をデフォルトにしておく
+const csvMonthInput = document.getElementById("csvMonth");
+{
+    const now = new Date();
+    csvMonthInput.value = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+}
+
 let req = indexedDB.open("tripDB", 1);
 
 req.onupgradeneeded = e => {
@@ -257,8 +299,20 @@ req.onupgradeneeded = e => {
 
 req.onsuccess = e => {
     db = e.target.result;
+
+    // ページを開いたら日付欄を当日にしておく
+    fp.setDate(getTodayStr(), true);
+
     load();
 };
+
+// 当日の日付を「Y-m-d」のローカル時間で取得（タイムゾーンずれ防止）
+function getTodayStr() {
+    const d = new Date();
+    return d.getFullYear() + "-" +
+        String(d.getMonth() + 1).padStart(2, '0') + "-" +
+        String(d.getDate()).padStart(2, '0');
+}
 
 // カレンダー初期化（✅ズレ修正済）
 const fp = flatpickr("#date", {
@@ -356,6 +410,7 @@ createPersonRow();
 function add() {
     let place = document.getElementById("place").value;
     let date = document.getElementById("date").value;
+    let inputter = inputterInput.value;
 
     let tx = db.transaction("records", "readwrite");
     let store = tx.objectStore("records");
@@ -367,7 +422,7 @@ function add() {
         let count = div.querySelector(".p-count").value || 1;
         let kubun = div.querySelector(".p-kubun").value || "その他";
 
-        store.add({ date, name, count, kubun, place });
+        store.add({ date, name, count, kubun, place, inputter });
     });
 
     load();
@@ -485,6 +540,7 @@ function renderList() {
         <div class="card">
             ${r.name}（${r.count}人 / ${r.kubun}）<br>
             → ${r.place}<br>
+            ${r.inputter ? `<span style="color:#999;font-size:13px;">入力者: ${escapeHtml(r.inputter)}</span><br>` : ""}
             <button onclick="del(${r.id})">削除</button>
         </div>`;
     });
@@ -500,27 +556,68 @@ function del(id) {
     load();
 }
 
-// CSVバックアップ
+// CSVの値を安全な形にする（カンマ・引用符・改行を含む場合は "" で囲む）
+function csvField(value) {
+    let str = String(value ?? "");
+    if (/[",\n\r]/.test(str)) {
+        str = '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
+// 記録の配列からCSV文字列を作る
+function buildCsv(data) {
+    let rows = [["date", "name", "count", "kubun", "place", "inputter"]];
+    data.forEach(r => {
+        rows.push([r.date, r.name, r.count, r.kubun, r.place, r.inputter || ""]);
+    });
+    return rows.map(row => row.map(csvField).join(",")).join("\r\n");
+}
+
+// CSV文字列をファイルとしてダウンロード（BOM付きでExcelの文字化けを防ぐ）
+function downloadCsv(csv, filename) {
+    let blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    let url = URL.createObjectURL(blob);
+
+    let a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+}
+
+// CSVバックアップ（全期間）
 function exportCSV() {
     let tx = db.transaction("records", "readonly");
     let store = tx.objectStore("records");
     let req = store.getAll();
 
     req.onsuccess = () => {
-        let data = req.result;
+        downloadCsv(buildCsv(req.result), "trip_log_all.csv");
+    };
+}
 
-        let csv = "date,name,count,kubun,place\n";
-        data.forEach(r => {
-            csv += `${r.date},${r.name},${r.count},${r.kubun},${r.place}\n`;
-        });
+// CSV出力（選んだ月だけ）
+function exportCSVByMonth() {
+    let monthValue = csvMonthInput.value; // "YYYY-MM"
 
-        let blob = new Blob([csv], { type: "text/csv" });
-        let url = URL.createObjectURL(blob);
+    if (!monthValue) {
+        alert("出力する月を選んでください");
+        return;
+    }
 
-        let a = document.createElement("a");
-        a.href = url;
-        a.download = "trip_log.csv";
-        a.click();
+    let tx = db.transaction("records", "readonly");
+    let store = tx.objectStore("records");
+    let req = store.getAll();
+
+    req.onsuccess = () => {
+        let filtered = req.result.filter(r => r.date && r.date.startsWith(monthValue));
+
+        if (filtered.length === 0) {
+            alert(`${monthValue} の記録はありません`);
+            return;
+        }
+
+        downloadCsv(buildCsv(filtered), `trip_log_${monthValue}.csv`);
     };
 }
 
