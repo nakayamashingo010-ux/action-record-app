@@ -151,8 +151,10 @@ button:active {
 }
 
 .autocomplete-item {
-    padding: 12px 14px;
-    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 4px 4px 14px;
     border-bottom: 1px solid #f0f0f0;
     -webkit-tap-highlight-color: transparent;
 }
@@ -163,6 +165,29 @@ button:active {
 
 .autocomplete-item:active {
     background: #eaf2fb;
+}
+
+.autocomplete-text {
+    flex: 1;
+    padding: 12px 0;
+    font-size: 16px;
+}
+
+.autocomplete-delete {
+    width: auto !important;
+    flex-shrink: 0;
+    margin: 0 !important;
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+    background: transparent !important;
+    color: #c44848 !important;
+    border: none !important;
+    font-weight: normal !important;
+}
+
+.autocomplete-delete:active {
+    background: #fbeaea !important;
+    border-radius: 6px;
 }
 
 .person input {
@@ -370,7 +395,11 @@ function createPersonRow() {
         </div>`;
 
     peopleDiv.appendChild(div);
-    attachAutocomplete(div.querySelector(".p-name"), () => nameSuggestions);
+    attachAutocomplete(div.querySelector(".p-name"), () => nameSuggestions, (value) => {
+        hiddenNames.add(value);
+        saveHiddenSet(HIDDEN_NAMES_KEY, hiddenNames);
+        nameSuggestions = nameSuggestions.filter(v => v !== value);
+    });
     renumberPeople();
     updateAddButtonState();
 }
@@ -412,12 +441,16 @@ function add() {
     let date = document.getElementById("date").value;
     let inputter = inputterInput.value;
 
+    unhideSuggestion(place, hiddenPlaces, HIDDEN_PLACES_KEY);
+
     let tx = db.transaction("records", "readwrite");
     let store = tx.objectStore("records");
 
     document.querySelectorAll(".person").forEach(div => {
         let name = div.querySelector(".p-name").value;
         if (!name) return;
+
+        unhideSuggestion(name, hiddenNames, HIDDEN_NAMES_KEY);
 
         let count = div.querySelector(".p-count").value || 1;
         let kubun = div.querySelector(".p-kubun").value || "その他";
@@ -456,14 +489,42 @@ function load() {
     };
 }
 
-// 過去に入力した名前・行き先を候補として保持
+// 過去に入力した名前・行き先を候補として保持（削除した候補は除外）
 let nameSuggestions = [];
 let placeSuggestions = [];
 
+const HIDDEN_NAMES_KEY = "hiddenNameSuggestions";
+const HIDDEN_PLACES_KEY = "hiddenPlaceSuggestions";
+
+function loadHiddenSet(key) {
+    try {
+        return new Set(JSON.parse(localStorage.getItem(key) || "[]"));
+    } catch {
+        return new Set();
+    }
+}
+
+function saveHiddenSet(key, set) {
+    localStorage.setItem(key, JSON.stringify([...set]));
+}
+
+let hiddenNames = loadHiddenSet(HIDDEN_NAMES_KEY);
+let hiddenPlaces = loadHiddenSet(HIDDEN_PLACES_KEY);
+
+// 候補から削除した値も、新しい記録で再び使われたら候補に復活させる
+function unhideSuggestion(value, hiddenSet, key) {
+    if (value && hiddenSet.has(value)) {
+        hiddenSet.delete(value);
+        saveHiddenSet(key, hiddenSet);
+    }
+}
+
 function updateSuggestions(data) {
     nameSuggestions = [...new Set(data.map(r => r.name).filter(Boolean))]
+        .filter(v => !hiddenNames.has(v))
         .sort((a, b) => a.localeCompare(b, "ja"));
     placeSuggestions = [...new Set(data.map(r => r.place).filter(Boolean))]
+        .filter(v => !hiddenPlaces.has(v))
         .sort((a, b) => a.localeCompare(b, "ja"));
 }
 
@@ -476,11 +537,14 @@ function escapeHtml(str) {
 }
 
 // タップで開く候補一覧（名前・行き先で共通利用）
-function attachAutocomplete(input, getList) {
+// onRemove(value) が渡された場合、各候補に削除ボタンが付く
+function attachAutocomplete(input, getList, onRemove) {
     const wrap = input.closest(".autocomplete-wrap");
     const list = wrap.querySelector(".autocomplete-list");
+    let lastFilter = "";
 
     function render(filter) {
+        lastFilter = filter;
         let items = getList().filter(v => v.toLowerCase().includes(filter.toLowerCase()));
 
         if (items.length === 0) {
@@ -489,7 +553,11 @@ function attachAutocomplete(input, getList) {
             return;
         }
 
-        list.innerHTML = items.map(v => `<div class="autocomplete-item">${escapeHtml(v)}</div>`).join("");
+        list.innerHTML = items.map(v => `
+            <div class="autocomplete-item" data-value="${escapeHtml(v)}">
+                <span class="autocomplete-text">${escapeHtml(v)}</span>
+                ${onRemove ? `<button type="button" class="autocomplete-delete">✕</button>` : ""}
+            </div>`).join("");
         list.classList.add("show");
     }
 
@@ -508,13 +576,26 @@ function attachAutocomplete(input, getList) {
     list.addEventListener("click", e => {
         const item = e.target.closest(".autocomplete-item");
         if (!item) return;
-        input.value = item.textContent;
+        const value = item.dataset.value;
+
+        // ✕ボタンなら候補から削除するだけ（入力はしない）
+        if (e.target.closest(".autocomplete-delete")) {
+            if (onRemove) onRemove(value);
+            render(lastFilter);
+            return;
+        }
+
+        input.value = value;
         list.classList.remove("show");
     });
 }
 
-// 行き先欄に候補機能を設定
-attachAutocomplete(document.getElementById("place"), () => placeSuggestions);
+// 行き先欄に候補機能を設定（削除ボタン付き）
+attachAutocomplete(document.getElementById("place"), () => placeSuggestions, (value) => {
+    hiddenPlaces.add(value);
+    saveHiddenSet(HIDDEN_PLACES_KEY, hiddenPlaces);
+    placeSuggestions = placeSuggestions.filter(v => v !== value);
+});
 
 // 一覧を「選択している日付」だけ絞り込んで描画
 function renderList() {
