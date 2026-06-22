@@ -340,26 +340,46 @@ function getTodayStr() {
 const fp = flatpickr("#date", {
     dateFormat: "Y-m-d",
     onDayCreate: function(dObj, dStr, fp, dayElem) {
-
         let d = dayElem.dateObj;
-
-        // ✅ ローカル時間で日付生成（ズレ防止）
         let dateStr = d.getFullYear() + "-" +
             String(d.getMonth() + 1).padStart(2, '0') + "-" +
             String(d.getDate()).padStart(2, '0');
 
+        // ✅ 常にdata-dateを付けておき、後からDOMを直接操作できるようにする
+        dayElem.dataset.date = dateStr;
+
         if (selectedDates.includes(dateStr)) {
-            dayElem.classList.add("has-data");
-            // CSSの優先度に依存しないようJSでも直接スタイルを設定
-            dayElem.style.fontWeight = "700";
-            dayElem.style.boxShadow = "inset 0 -4px 0 0 #4a90d9";
+            applyDayMarker(dayElem);
         }
     },
     onChange: function() {
-        // 日付が変わったら、その日付の記録だけ一覧に表示し直す
         renderList();
+    },
+    onMonthChange: function() {
+        // ✅ 月が変わった時も確実にマーカーを付け直す
+        setTimeout(refreshDayMarkers, 0);
     }
 });
+
+// マーカーを1つの日付要素に付ける
+function applyDayMarker(dayElem) {
+    dayElem.classList.add("has-data");
+    dayElem.style.fontWeight = "700";
+    dayElem.style.boxShadow = "inset 0 -4px 0 0 #4a90d9";
+}
+
+// ✅ fp.redraw()に頼らず、既存のDOM要素にマーカーを直接付け直す
+function refreshDayMarkers() {
+    document.querySelectorAll(".flatpickr-day[data-date]").forEach(dayElem => {
+        if (selectedDates.includes(dayElem.dataset.date)) {
+            applyDayMarker(dayElem);
+        } else {
+            dayElem.classList.remove("has-data");
+            dayElem.style.fontWeight = "";
+            dayElem.style.boxShadow = "";
+        }
+    });
+}
 
 // 人物入力（最初は1人、ボタンで追加／削除）
 const peopleDiv = document.getElementById("people");
@@ -458,7 +478,8 @@ function add() {
         store.add({ date, name, count, kubun, place, inputter });
     });
 
-    load();
+    // ✅ トランザクションが完全に完了してからloadする（書き込み前にloadしてしまうバグを修正）
+    tx.oncomplete = () => load();
 }
 
 // 表示＋カレンダー更新
@@ -481,7 +502,8 @@ function load() {
             }
         });
 
-        fp.redraw(); // カレンダー再描画
+        fp.redraw(); // カレンダー再描画（月移動時用）
+        refreshDayMarkers(); // ✅ 既存DOM要素に直接マーカーを付け直す
 
         allRecords = data.reverse(); // 新しい記録が先頭
         renderList();
