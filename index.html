@@ -802,17 +802,36 @@ function renderList() {
             ${r.name}（${r.count}人 / ${r.kubun}）<br>
             → ${r.place}<br>
             ${r.inputter ? `<span style="color:#999;font-size:13px;">入力者: ${escapeHtml(r.inputter)}</span><br>` : ""}
-            <button onclick="del(${r.id})">削除</button>
+            <button data-del-id="${r.id}" onclick="del(${r.id})">削除</button>
         </div>`;
     });
 
     list.innerHTML = html;
 }
 
-// 削除（確認あり・非同期バグ修正）
+// 削除（インライン確認・非同期バグ修正）
 function del(id) {
-    if (!confirm("この記録を削除しますか？")) return;
+    // 1回目のタップ: ボタンを確認状態に切り替える
+    const btn = document.querySelector(`[data-del-id="${id}"]`);
+    if (!btn) return;
 
+    if (!btn.dataset.confirming) {
+        btn.dataset.confirming = "1";
+        btn.textContent = "本当に削除？";
+        btn.style.background = "#c44848";
+
+        // 3秒後に自動でキャンセル
+        setTimeout(() => {
+            if (btn.dataset.confirming) {
+                btn.dataset.confirming = "";
+                btn.textContent = "削除";
+                btn.style.background = "";
+            }
+        }, 3000);
+        return;
+    }
+
+    // 2回目のタップ: 実際に削除
     const tx    = db.transaction("records", "readwrite");
     const store = tx.objectStore("records");
     store.delete(id);
