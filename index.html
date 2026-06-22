@@ -226,27 +226,22 @@ button:active {
 }
 
 /* カレンダー：記録がある日をわかりやすく表示 */
+/* スタイルはJSから直接適用（iOS SafariのCSS優先度問題を回避） */
 .flatpickr-day.has-data {
-    font-weight: 700;
-    position: relative;
+    font-weight: 700 !important;
+    color: #1a1a1a !important;
+    box-shadow: inset 0 -4px 0 0 #4a90d9 !important;
 }
 
-.flatpickr-day.has-data::after {
-    content: "";
-    position: absolute;
-    bottom: 4px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #4a90d9;
+.flatpickr-day.has-data.selected,
+.flatpickr-day.has-data.startRange,
+.flatpickr-day.has-data.endRange {
+    box-shadow: inset 0 -4px 0 0 rgba(255,255,255,0.7) !important;
+    font-weight: 700 !important;
 }
 
-.flatpickr-day.has-data.selected::after,
-.flatpickr-day.has-data.startRange::after,
-.flatpickr-day.has-data.endRange::after {
-    background: #fff;
+.flatpickr-day.has-data.today:not(.selected) {
+    box-shadow: inset 0 -4px 0 0 #4a90d9 !important;
 }
 
 /* flatpickr 自体の文字も少し大きく */
@@ -261,6 +256,8 @@ button:active {
     height: 44px !important;
 }
 </style>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 
 <body>
@@ -283,14 +280,14 @@ button:active {
     <div class="autocomplete-list"></div>
 </div>
 
-<button onclick="add()">追加</button>
+<button onclick="add()">記録</button>
 
-<h3>CSV出力</h3>
-<button onclick="exportCSV()">全期間をCSV出力</button>
+<h3>エクセル保存</h3>
+<button onclick="exportXlsx()">全期間をエクセル保存</button>
 
-<label for="csvMonth">月を選んで出力</label>
+<label for="csvMonth">月を選んで保存</label>
 <input type="month" id="csvMonth">
-<button type="button" class="secondary-btn" onclick="exportCSVByMonth()">選んだ月だけCSV出力</button>
+<button type="button" class="secondary-btn" onclick="exportXlsxByMonth()">選んだ月だけエクセル保存</button>
 
 <h3>一覧</h3>
 <div id="list"></div>
@@ -353,6 +350,9 @@ const fp = flatpickr("#date", {
 
         if (selectedDates.includes(dateStr)) {
             dayElem.classList.add("has-data");
+            // CSSの優先度に依存しないようJSでも直接スタイルを設定
+            dayElem.style.fontWeight = "700";
+            dayElem.style.boxShadow = "inset 0 -4px 0 0 #4a90d9";
         }
     },
     onChange: function() {
@@ -637,52 +637,49 @@ function del(id) {
     load();
 }
 
-// CSVの値を安全な形にする（カンマ・引用符・改行を含む場合は "" で囲む）
-function csvField(value) {
-    let str = String(value ?? "");
-    if (/[",\n\r]/.test(str)) {
-        str = '"' + str.replace(/"/g, '""') + '"';
-    }
-    return str;
-}
-
-// 記録の配列からCSV文字列を作る
-function buildCsv(data) {
+// 記録の配列からExcelファイルを作ってダウンロード
+function downloadXlsx(data, filename) {
+    // ヘッダー付きの行データを作る
     let rows = [["date", "name", "count", "kubun", "place", "inputter"]];
     data.forEach(r => {
-        rows.push([r.date, r.name, r.count, r.kubun, r.place, r.inputter || ""]);
+        rows.push([r.date || "", r.name || "", Number(r.count) || 1, r.kubun || "", r.place || "", r.inputter || ""]);
     });
-    return rows.map(row => row.map(csvField).join(",")).join("\r\n");
+
+    let ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // 列幅を整える
+    ws["!cols"] = [
+        { wch: 12 }, // 日付
+        { wch: 14 }, // 名前
+        { wch: 6  }, // 人数
+        { wch: 10 }, // 区分
+        { wch: 20 }, // 行き先
+        { wch: 12 }, // 入力者
+    ];
+
+    let wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "記録");
+
+    XLSX.writeFile(wb, filename);
 }
 
-// CSV文字列をファイルとしてダウンロード（BOM付きでExcelの文字化けを防ぐ）
-function downloadCsv(csv, filename) {
-    let blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    let url = URL.createObjectURL(blob);
-
-    let a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-}
-
-// CSVバックアップ（全期間）
-function exportCSV() {
+// エクセル保存（全期間）
+function exportXlsx() {
     let tx = db.transaction("records", "readonly");
     let store = tx.objectStore("records");
     let req = store.getAll();
 
     req.onsuccess = () => {
-        downloadCsv(buildCsv(req.result), "trip_log_all.csv");
+        downloadXlsx(req.result, "行動記録_全期間.xlsx");
     };
 }
 
-// CSV出力（選んだ月だけ）
-function exportCSVByMonth() {
+// エクセル保存（選んだ月だけ）
+function exportXlsxByMonth() {
     let monthValue = csvMonthInput.value; // "YYYY-MM"
 
     if (!monthValue) {
-        alert("出力する月を選んでください");
+        alert("保存する月を選んでください");
         return;
     }
 
@@ -698,7 +695,7 @@ function exportCSVByMonth() {
             return;
         }
 
-        downloadCsv(buildCsv(filtered), `trip_log_${monthValue}.csv`);
+        downloadXlsx(filtered, `行動記録_${monthValue}.xlsx`);
     };
 }
 
