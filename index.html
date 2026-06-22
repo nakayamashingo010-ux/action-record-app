@@ -221,7 +221,23 @@ button:active {
     background: #c44848;
 }
 
-/* カレンダー */
+/* 保存完了トースト */
+#toast {
+    display: none;
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #2a2a2a;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 24px;
+    font-size: 15px;
+    z-index: 999;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
 .cal-wrap {
     background: white;
     border-radius: 12px;
@@ -351,6 +367,7 @@ button:active {
 <body>
 
 <h2>行動記録</h2>
+<div id="toast"></div>
 
 <label for="inputter">入力者名（あなたの名前）</label>
 <input id="inputter" placeholder="例: 田中">
@@ -576,31 +593,52 @@ function updateAddButtonState() {
 // 最初は1人分だけ表示
 createPersonRow();
 
-// 追加
+// 記録ボタン
 function add() {
-    let place = document.getElementById("place").value;
-    let date = document.getElementById("date").value;
-    let inputter = inputterInput.value;
+    const date     = document.getElementById("date").value;
+    const place    = document.getElementById("place").value.trim();
+    const inputter = inputterInput.value;
+
+    // ── バリデーション ──
+    const names = [...document.querySelectorAll(".person .p-name")]
+        .map(el => el.value.trim())
+        .filter(Boolean);
+
+    if (!date) {
+        showToast("⚠️ 日付を選択してください");
+        return;
+    }
+    if (names.length === 0) {
+        showToast("⚠️ 名前を1人以上入力してください");
+        return;
+    }
+    if (!place) {
+        showToast("⚠️ 行き先を入力してください");
+        return;
+    }
+    // ────────────────────
 
     unhideSuggestion(place, hiddenPlaces, HIDDEN_PLACES_KEY);
 
-    let tx = db.transaction("records", "readwrite");
-    let store = tx.objectStore("records");
+    const tx    = db.transaction("records", "readwrite");
+    const store = tx.objectStore("records");
 
     document.querySelectorAll(".person").forEach(div => {
-        let name = div.querySelector(".p-name").value;
+        const name = div.querySelector(".p-name").value.trim();
         if (!name) return;
 
         unhideSuggestion(name, hiddenNames, HIDDEN_NAMES_KEY);
 
-        let count = div.querySelector(".p-count").value || 1;
-        let kubun = div.querySelector(".p-kubun").value || "その他";
+        const count = div.querySelector(".p-count").value || 1;
+        const kubun = div.querySelector(".p-kubun").value || "その他";
 
         store.add({ date, name, count, kubun, place, inputter });
     });
 
-    // ✅ トランザクションが完全に完了してからloadする（書き込み前にloadしてしまうバグを修正）
-    tx.oncomplete = () => load();
+    tx.oncomplete = () => {
+        load();
+        showToast(`✅ ${names.length}人を記録しました`);
+    };
 }
 
 // 表示＋カレンダー更新
@@ -771,12 +809,33 @@ function renderList() {
     list.innerHTML = html;
 }
 
-// 削除
+// 削除（確認あり・非同期バグ修正）
 function del(id) {
-    let tx = db.transaction("records", "readwrite");
-    let store = tx.objectStore("records");
+    if (!confirm("この記録を削除しますか？")) return;
+
+    const tx    = db.transaction("records", "readwrite");
+    const store = tx.objectStore("records");
     store.delete(id);
-    load();
+
+    tx.oncomplete = () => {
+        load();
+        showToast("🗑️ 削除しました");
+    };
+}
+
+// トースト通知（画面下にふわっと表示）
+let toastTimer = null;
+function showToast(msg) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.style.display = "block";
+    requestAnimationFrame(() => { el.style.opacity = "1"; });
+
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        el.style.opacity = "0";
+        setTimeout(() => { el.style.display = "none"; }, 200);
+    }, 2200);
 }
 
 // 記録の配列からExcelファイルを作ってダウンロード
