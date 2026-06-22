@@ -6,8 +6,8 @@
 <title>行動記録</title>
 
 <!-- カレンダー -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
 
 <style>
 * {
@@ -336,39 +336,40 @@ function getTodayStr() {
         String(d.getDate()).padStart(2, '0');
 }
 
-// カレンダー初期化（✅ズレ修正済）
+// カレンダー初期化
 const fp = flatpickr("#date", {
     dateFormat: "Y-m-d",
     onDayCreate: function(dObj, dStr, fp, dayElem) {
+        if (!dayElem.dateObj) return;
         let d = dayElem.dateObj;
         let dateStr = d.getFullYear() + "-" +
             String(d.getMonth() + 1).padStart(2, '0') + "-" +
             String(d.getDate()).padStart(2, '0');
 
-        // ✅ 常にdata-dateを付けておき、後からDOMを直接操作できるようにする
         dayElem.dataset.date = dateStr;
 
         if (selectedDates.includes(dateStr)) {
             applyDayMarker(dayElem);
         }
     },
+    // ✅ カレンダーを開くたびに必ずマーカーを付け直す（これが一番確実）
+    onOpen: function() {
+        setTimeout(refreshDayMarkers, 0);
+    },
     onChange: function() {
         renderList();
     },
     onMonthChange: function() {
-        // ✅ 月が変わった時も確実にマーカーを付け直す
         setTimeout(refreshDayMarkers, 0);
     }
 });
 
-// マーカーを1つの日付要素に付ける
 function applyDayMarker(dayElem) {
     dayElem.classList.add("has-data");
     dayElem.style.fontWeight = "700";
     dayElem.style.boxShadow = "inset 0 -4px 0 0 #4a90d9";
 }
 
-// ✅ fp.redraw()に頼らず、既存のDOM要素にマーカーを直接付け直す
 function refreshDayMarkers() {
     document.querySelectorAll(".flatpickr-day[data-date]").forEach(dayElem => {
         if (selectedDates.includes(dayElem.dataset.date)) {
@@ -502,8 +503,8 @@ function load() {
             }
         });
 
-        fp.redraw(); // カレンダー再描画（月移動時用）
-        refreshDayMarkers(); // ✅ 既存DOM要素に直接マーカーを付け直す
+        fp.redraw(); // 月移動時のonDayCreate用（バージョン固定済みなので安全）
+        setTimeout(refreshDayMarkers, 0); // ✅ DOM確定後にマーカーを付け直す
 
         allRecords = data.reverse(); // 新しい記録が先頭
         renderList();
