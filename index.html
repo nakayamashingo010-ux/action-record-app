@@ -5,10 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>行動記録</title>
 
-<!-- カレンダー -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
-
 <style>
 * {
     box-sizing: border-box;
@@ -225,35 +221,127 @@ button:active {
     background: #c44848;
 }
 
-/* カレンダー：記録がある日をわかりやすく表示 */
-/* スタイルはJSから直接適用（iOS SafariのCSS優先度問題を回避） */
-.flatpickr-day.has-data {
-    font-weight: 700 !important;
-    color: #1a1a1a !important;
-    box-shadow: inset 0 -4px 0 0 #4a90d9 !important;
+/* カレンダー */
+.cal-wrap {
+    background: white;
+    border-radius: 12px;
+    padding: 12px 8px;
+    margin: 6px 0 14px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
-.flatpickr-day.has-data.selected,
-.flatpickr-day.has-data.startRange,
-.flatpickr-day.has-data.endRange {
-    box-shadow: inset 0 -4px 0 0 rgba(255,255,255,0.7) !important;
-    font-weight: 700 !important;
+.cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
 }
 
-.flatpickr-day.has-data.today:not(.selected) {
-    box-shadow: inset 0 -4px 0 0 #4a90d9 !important;
+.cal-month-label {
+    font-size: 17px;
+    font-weight: bold;
+    color: #1a1a1a;
 }
 
-/* flatpickr 自体の文字も少し大きく */
-.flatpickr-calendar {
-    font-size: 16px !important;
-    width: 100% !important;
-    max-width: 480px;
+.cal-nav {
+    width: 40px !important;
+    height: 40px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    font-size: 22px !important;
+    background: #f0f0f0 !important;
+    color: #333 !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: normal !important;
+    line-height: 1 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.flatpickr-day {
-    line-height: 44px !important;
-    height: 44px !important;
+.cal-nav:active {
+    background: #ddd !important;
+}
+
+.cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.cal-day-name {
+    text-align: center;
+    font-size: 12px;
+    color: #888;
+    padding: 4px 0 6px;
+    font-weight: bold;
+}
+
+.cal-day-name.sun { color: #e05c5c; }
+.cal-day-name.sat { color: #4a90d9; }
+
+.cal-day {
+    position: relative;
+    text-align: center;
+    font-size: 16px;
+    border-radius: 50%;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cal-day:active {
+    background: #eaf2fb;
+}
+
+.cal-day.empty {
+    cursor: default;
+    pointer-events: none;
+}
+
+.cal-day.sun { color: #e05c5c; }
+.cal-day.sat { color: #4a90d9; }
+
+.cal-day.today {
+    color: #4a90d9 !important;
+    font-weight: bold;
+    border: 2px solid #4a90d9;
+}
+
+.cal-day.selected {
+    background: #4a90d9 !important;
+    color: white !important;
+    font-weight: bold;
+    border: none;
+}
+
+/* 記録がある日: 太字 + 下に青い丸 */
+.cal-day.has-data {
+    font-weight: 700;
+}
+
+.cal-day.has-data::after {
+    content: "";
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #4a90d9;
+}
+
+.cal-day.has-data.selected::after {
+    background: white;
+}
+
+.cal-day.has-data.today:not(.selected)::after {
+    background: #4a90d9;
 }
 </style>
 
@@ -267,8 +355,16 @@ button:active {
 <label for="inputter">入力者名（あなたの名前）</label>
 <input id="inputter" placeholder="例: 田中">
 
-<label for="date">日付</label>
-<input id="date" placeholder="日付を選択">
+<label>日付</label>
+<div class="cal-wrap">
+    <div class="cal-header">
+        <button type="button" class="cal-nav" onclick="calPrev()">‹</button>
+        <span class="cal-month-label" id="cal-month-label"></span>
+        <button type="button" class="cal-nav" onclick="calNext()">›</button>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+</div>
+<input type="hidden" id="date">
 
 <h3>人物（最大10人）</h3>
 <div id="people"></div>
@@ -321,10 +417,7 @@ req.onupgradeneeded = e => {
 
 req.onsuccess = e => {
     db = e.target.result;
-
-    // ページを開いたら日付欄を当日にしておく
-    fp.setDate(getTodayStr(), true);
-
+    initCal();
     load();
 };
 
@@ -336,51 +429,78 @@ function getTodayStr() {
         String(d.getDate()).padStart(2, '0');
 }
 
-// カレンダー初期化
-const fp = flatpickr("#date", {
-    dateFormat: "Y-m-d",
-    onDayCreate: function(dObj, dStr, fp, dayElem) {
-        if (!dayElem.dateObj) return;
-        let d = dayElem.dateObj;
-        let dateStr = d.getFullYear() + "-" +
-            String(d.getMonth() + 1).padStart(2, '0') + "-" +
-            String(d.getDate()).padStart(2, '0');
+// ── 自前カレンダー ──────────────────────────────
+const MONTHS_JA = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+const DAYS_JA   = ["日","月","火","水","木","金","土"];
 
-        dayElem.dataset.date = dateStr;
+let calYear, calMonth, calSelected = "";
 
-        if (selectedDates.includes(dateStr)) {
-            applyDayMarker(dayElem);
-        }
-    },
-    // ✅ カレンダーを開くたびに必ずマーカーを付け直す（これが一番確実）
-    onOpen: function() {
-        setTimeout(refreshDayMarkers, 0);
-    },
-    onChange: function() {
-        renderList();
-    },
-    onMonthChange: function() {
-        setTimeout(refreshDayMarkers, 0);
+function initCal() {
+    const today = new Date();
+    calYear    = today.getFullYear();
+    calMonth   = today.getMonth();
+    calSelected = getTodayStr();
+    document.getElementById("date").value = calSelected;
+    renderCal();
+}
+
+function renderCal() {
+    document.getElementById("cal-month-label").textContent =
+        `${calYear}年${MONTHS_JA[calMonth]}`;
+
+    const today     = getTodayStr();
+    const firstDow  = new Date(calYear, calMonth, 1).getDay();   // 0=日
+    const daysInMon = new Date(calYear, calMonth + 1, 0).getDate();
+
+    // 曜日ヘッダー
+    let html = DAYS_JA.map((d, i) =>
+        `<div class="cal-day-name ${i===0?"sun":i===6?"sat":""}">${d}</div>`
+    ).join("");
+
+    // 月初め前の空白
+    for (let i = 0; i < firstDow; i++) {
+        html += `<div class="cal-day empty"></div>`;
     }
-});
 
-function applyDayMarker(dayElem) {
-    dayElem.classList.add("has-data");
-    dayElem.style.fontWeight = "700";
-    dayElem.style.boxShadow = "inset 0 -4px 0 0 #4a90d9";
+    // 日付セル
+    for (let d = 1; d <= daysInMon; d++) {
+        const dateStr = calYear + "-" +
+            String(calMonth + 1).padStart(2, "0") + "-" +
+            String(d).padStart(2, "0");
+
+        const dow = (firstDow + d - 1) % 7;
+        let cls = "cal-day";
+        if (dow === 0) cls += " sun";
+        if (dow === 6) cls += " sat";
+        if (dateStr === today)       cls += " today";
+        if (dateStr === calSelected) cls += " selected";
+        if (selectedDates.includes(dateStr)) cls += " has-data";
+
+        html += `<div class="${cls}" onclick="selectDate('${dateStr}')">${d}</div>`;
+    }
+
+    document.getElementById("cal-grid").innerHTML = html;
 }
 
-function refreshDayMarkers() {
-    document.querySelectorAll(".flatpickr-day[data-date]").forEach(dayElem => {
-        if (selectedDates.includes(dayElem.dataset.date)) {
-            applyDayMarker(dayElem);
-        } else {
-            dayElem.classList.remove("has-data");
-            dayElem.style.fontWeight = "";
-            dayElem.style.boxShadow = "";
-        }
-    });
+function selectDate(dateStr) {
+    calSelected = dateStr;
+    document.getElementById("date").value = dateStr;
+    renderCal();
+    renderList();
 }
+
+function calPrev() {
+    calMonth--;
+    if (calMonth < 0) { calMonth = 11; calYear--; }
+    renderCal();
+}
+
+function calNext() {
+    calMonth++;
+    if (calMonth > 11) { calMonth = 0; calYear++; }
+    renderCal();
+}
+// ────────────────────────────────────────────────
 
 // 人物入力（最初は1人、ボタンで追加／削除）
 const peopleDiv = document.getElementById("people");
@@ -503,8 +623,7 @@ function load() {
             }
         });
 
-        fp.redraw(); // 月移動時のonDayCreate用（バージョン固定済みなので安全）
-        setTimeout(refreshDayMarkers, 0); // ✅ DOM確定後にマーカーを付け直す
+        renderCal(); // カレンダーのマーカーを更新
 
         allRecords = data.reverse(); // 新しい記録が先頭
         renderList();
