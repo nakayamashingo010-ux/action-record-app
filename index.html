@@ -548,7 +548,10 @@ function createPersonRow() {
             </div>
             <div style="flex:1">
                 <label>区分</label>
-                <input class="p-kubun" placeholder="区分">
+                <div class="autocomplete-wrap">
+                    <input class="p-kubun" placeholder="区分">
+                    <div class="autocomplete-list"></div>
+                </div>
             </div>
         </div>`;
 
@@ -557,6 +560,11 @@ function createPersonRow() {
         hiddenNames.add(value);
         saveHiddenSet(HIDDEN_NAMES_KEY, hiddenNames);
         nameSuggestions = nameSuggestions.filter(v => v !== value);
+    });
+    attachAutocomplete(div.querySelector(".p-kubun"), () => kubunSuggestions, (value) => {
+        hiddenKubun.add(value);
+        saveHiddenSet(HIDDEN_KUBUN_KEY, hiddenKubun);
+        kubunSuggestions = kubunSuggestions.filter(v => v !== value);
     });
     renumberPeople();
     updateAddButtonState();
@@ -632,6 +640,8 @@ function add() {
         const count = div.querySelector(".p-count").value || 1;
         const kubun = div.querySelector(".p-kubun").value || "その他";
 
+        unhideSuggestion(kubun, hiddenKubun, HIDDEN_KUBUN_KEY);
+
         store.add({ date, name, count, kubun, place, inputter });
     });
 
@@ -669,12 +679,14 @@ function load() {
     };
 }
 
-// 過去に入力した名前・行き先を候補として保持（削除した候補は除外）
+// 過去に入力した名前・行き先・区分を候補として保持（削除した候補は除外）
 let nameSuggestions = [];
 let placeSuggestions = [];
+let kubunSuggestions = [];
 
-const HIDDEN_NAMES_KEY = "hiddenNameSuggestions";
+const HIDDEN_NAMES_KEY  = "hiddenNameSuggestions";
 const HIDDEN_PLACES_KEY = "hiddenPlaceSuggestions";
+const HIDDEN_KUBUN_KEY  = "hiddenKubunSuggestions";
 
 function loadHiddenSet(key) {
     try {
@@ -688,8 +700,9 @@ function saveHiddenSet(key, set) {
     localStorage.setItem(key, JSON.stringify([...set]));
 }
 
-let hiddenNames = loadHiddenSet(HIDDEN_NAMES_KEY);
+let hiddenNames  = loadHiddenSet(HIDDEN_NAMES_KEY);
 let hiddenPlaces = loadHiddenSet(HIDDEN_PLACES_KEY);
+let hiddenKubun  = loadHiddenSet(HIDDEN_KUBUN_KEY);
 
 // 候補から削除した値も、新しい記録で再び使われたら候補に復活させる
 function unhideSuggestion(value, hiddenSet, key) {
@@ -705,6 +718,9 @@ function updateSuggestions(data) {
         .sort((a, b) => a.localeCompare(b, "ja"));
     placeSuggestions = [...new Set(data.map(r => r.place).filter(Boolean))]
         .filter(v => !hiddenPlaces.has(v))
+        .sort((a, b) => a.localeCompare(b, "ja"));
+    kubunSuggestions = [...new Set(data.map(r => r.kubun).filter(Boolean))]
+        .filter(v => !hiddenKubun.has(v))
         .sort((a, b) => a.localeCompare(b, "ja"));
 }
 
